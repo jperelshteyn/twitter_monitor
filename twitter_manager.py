@@ -90,6 +90,13 @@ def query(sarg, headline_id, max_tweets=10000, tweets_per_qry=100, max_id=-1L, s
 
 
 def get_sentiment_over_time(news_id, sarg):
+    '''
+    Get saved tweets corresponding to headline and score them on sentiment
+
+    Args:
+        news_id(str) -- db id of news article
+        sarg(str) -- tweeter search arguments
+    '''
     sentiment_by_time_list = []
     sentiment_by_time = {}
     tweet_count = 0
@@ -122,6 +129,14 @@ def get_sentiment_over_time(news_id, sarg):
 
 
 def get_time_scale(tweets, headline_text, publish_time):
+    '''
+    Figure out the best scale to use for displaying the data
+
+    Args:
+        tweets(list) -- tweet objects
+        headline_text(str) -- headline text
+        publish_time(datetime) -- headline publish time 
+    '''
     tweet_time = [get_tweet_time(t) for t in tweets if not is_retweet(t, headline_text)]
     max_time = max(tweet_time)
     min_time = min([t for t in tweet_time if t >= publish_time])
@@ -136,6 +151,13 @@ def get_time_scale(tweets, headline_text, publish_time):
 
 
 def read_db_tweets(news_id, sarg):
+    '''
+    Get tweets from database
+
+    Args:
+        news_id(ObjectId) -- headline id
+        sarg(str) -- tweeter search arguments
+    '''
     cursor = db.tweets.find({'$and' :[{'news_id': news_id}, {'sarg': sarg}]})
     return [tweet for tweet in cursor]
 
@@ -146,6 +168,13 @@ def get_tweet_time(tweet):
 
 
 def find_latest_tweet_id_before_headline(headline_id):
+    '''
+    Query db for tweets that came out after the headline
+
+    Args:
+        news_id(ObjectId) -- headline id
+
+    '''
     headline = headline_manager.get_headline_by_id(headline_id)
     h_time = headline['time']
     client = MongoClient()
@@ -160,6 +189,9 @@ def find_latest_tweet_id_before_headline(headline_id):
 
 
 def is_retweet(tweet, headline_text):
+    '''
+    Check if tweet text is exact match with headline text
+    '''
     tweet_text = tweet[u'tweet_data'][u'text']
     if 'http' in tweet_text:
         tweet_text = tweet_text[:tweet_text.index('http')]

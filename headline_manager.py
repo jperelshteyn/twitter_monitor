@@ -105,17 +105,11 @@ def u_to_a(u):
 def get_sargs(headline_blob, cut_off=0.5):
     sargs = []
     tfidf_scores = score_headline(headline_blob)
-    #word_tags = headline_blob.tags
-    #nouns = {word for word, tag in word_tags if tag in {u'NN', u'NNS'}}
     if not cut_off:
         cut_off = median([score for _, score in tfidf_scores])
     for word, score in tfidf_scores:
         if score >= cut_off: #and word in nouns:
-            sargs.append((word, score))
-    # if not sargs:
-    #     for word, score in tfidf_scores:
-    #         if score > cut_off:
-    #             sargs.append((word, score))      
+            sargs.append((word, score))    
     return sargs  
     
 
