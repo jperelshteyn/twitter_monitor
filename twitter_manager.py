@@ -11,6 +11,7 @@ from math import floor
 from bson.objectid import ObjectId
 from dateutil.parser import parse
 import headline_manager
+import pymongo
 
 
 client = MongoClient()
@@ -28,7 +29,7 @@ def initialize_api():
     return api
 
     
-def query(sarg, headline_id, max_tweets=10000, tweets_per_qry=100, max_id=-1L, since_id=None):
+def query(sarg, headline_id, max_tweets=2000, tweets_per_qry=100, max_id=-1L, since_id=None):
     '''
     Query twitter continuously with sargs and save to database
 
