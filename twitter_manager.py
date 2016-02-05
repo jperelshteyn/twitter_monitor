@@ -53,7 +53,6 @@ class Tweet:
 class Graph:
     def __init__(self, tweet_objs, headline_id):
         assert type(tweet_objs) is list
-        assert type(headline_id) is str
         
         headline_obj = db.news.find_one({u'_id': ObjectId(headline_id)})
         self.tweets = []
