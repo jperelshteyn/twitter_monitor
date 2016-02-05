@@ -129,10 +129,13 @@ def get_headlines_for_ddl(dt_string):
                               {"time": {"$lt": end_day}}
                              ]})
     headlines = []
+    unique = set()
     for item in cursor:
         h_id = str(item['_id'])
         h_text = item['headline']
-        headlines.append({'text': h_text, 'id': h_id})
+        if h_text not in unique:
+            headlines.append({'text': h_text, 'id': h_id})
+            unique.add(h_text)
     return headlines
 
     

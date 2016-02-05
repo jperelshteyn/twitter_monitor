@@ -18,6 +18,92 @@ client = MongoClient()
 db = client.twitter_news
 
 
+
+class Tweet:
+    def __init__(self, tweet_obj, headline_obj):
+        assert type(tweet_obj) is dict
+
+        self.text = tweet_obj[u'tweet_data'][u'text']
+        self.time_since = self._get_tweet_time(tweet_obj) - headline_obj[u'time']
+        t_blob = tb(self.text)
+        self.sentiment =  t_blob.sentiment.polarity
+        self.is_valid = self._is_valid(headline_obj)
+        self.scaled_time = None
+
+    def _get_tweet_time(self, tweet_obj):
+        dt = parse(tweet_obj[u'tweet_data'][u'created_at'])
+        return headline_manager.dt_to_epoch(dt.replace(tzinfo=None))
+
+    def _is_valid(self, headline_obj):
+        '''
+        Check if tweet text is exact match with headline text or was tweeted prior to headline
+        '''
+
+        if self.time_since < 0:
+            return False
+
+        if 'http' in self.text:
+            stripped_text = self.text[:self.text.index('http')]
+            return stripped_text.lower().strip() != headline_obj['headline'].lower().strip()
+
+    def scale(self, denominator):
+        self.scaled_time = int(floor(self.time_since / denominator))
+
+
+class Graph:
+    def __init__(self, tweet_objs, headline_id):
+        assert type(tweet_objs) is list
+        assert type(headline_id) is str
+        
+        headline_obj = db.news.find_one({u'_id': ObjectId(headline_id)})
+        self.tweets = []
+        self.max_time = 0
+        self.min_time = 0
+
+        for tweet_obj in tweet_objs:
+            tweet = Tweet(tweet_obj, headline_obj)
+            if tweet.is_valid:
+                self.tweets.append(tweet)
+                self.max_time = self.max_time if tweet.time_since < self.max_time else tweet.time_since
+                self.min_time = self.min_time if tweet.time_since > self.min_time else tweet.time_since
+
+        self.time_scale, self.denominator = self._time_scale()
+        self.points = self._make_points()
+        self.tweet_count = len(self.tweets)
+
+    def _make_points(self):
+        points = dict()
+        for tweet in self.tweets:
+            tweet.scale(self.denominator)
+            point = points.get(tweet.scaled_time, dict())
+            point_tweets = point.get('tweets', [])
+            point_tweets.append(tweet.text)
+            tweet_count = len(point_tweets)
+            sentiment = (point.get('sentiment', 0) * (tweet_count - 1) + tweet.sentiment) / tweet_count
+            points[tweet.scaled_time] = {'tweets': point_tweets, 'sentiment': sentiment}
+        return points
+
+    def to_json(self):
+        json = []
+        for time, point in sorted(self.points.items(), lambda t, _: t[0]):
+            json.append({'time': time,
+                         'sentiment': point['sentiment'],
+                         'tweets': point['tweets']})
+        return json
+
+
+    def _time_scale(self):
+        hour = 3600
+        diff_hours = (self.max_time - self.min_time) / hour
+        if diff_hours > 24 * 6:
+            return 'days', hour * 24
+        elif diff_hours > 4:
+            return 'hours', hour
+        else:
+            return 'minutes', hour / 60
+
+
+
 def initialize_api():
     '''
     Return tweepy api object loaded with twitter keys and tokens
@@ -91,6 +177,9 @@ def query(sarg, headline_id, max_tweets=2000, tweets_per_qry=100, max_id=-1L, si
 
 
 def get_sentiment_over_time(news_id, sarg):
+
+
+
     '''
     Get saved tweets corresponding to headline and score them on sentiment
 
@@ -107,26 +196,26 @@ def get_sentiment_over_time(news_id, sarg):
         publish_time = headline[u'time']
         headline_text = headline['headline']
         scale, denominator = get_time_scale(tweets, headline_text, publish_time)
-        for tweet in tweets:
-            tweet_time = get_tweet_time(tweet)
-            time_since = floor((tweet_time - publish_time) / denominator)
-            if time_since > 0 and not is_retweet(tweet, headline_text):
-                tweet_count += 1
-                tweet_text = tweet[u'tweet_data'][u'text']
-                t_blob = tb(tweet_text)
-                s = t_blob.sentiment
-                s_score = s.polarity
-                s_list = sentiment_by_time.get(time_since, [])
-                s_list.append(s_score)
-                sentiment_by_time[time_since] = s_list
-        for time_period in sentiment_by_time:
-            json_dict = {'time_period': time_period, 
-                         'sentiment': mean(sentiment_by_time[time_period])}
-            sentiment_by_time_list.append(json_dict)
-        sentiment_by_time_list = sorted(sentiment_by_time_list, key=lambda x: x['time_period'])
-        return sentiment_by_time_list, tweet_count, scale
-    else:
-        return None, None, None
+        if scale:
+            for tweet in tweets:
+                tweet_time = get_tweet_time(tweet)
+                time_since = floor((tweet_time - publish_time) / denominator)
+                if time_since > 0 and not is_retweet(tweet, headline_text):
+                    tweet_count += 1
+                    tweet_text = tweet[u'tweet_data'][u'text']
+                    t_blob = tb(tweet_text)
+                    s = t_blob.sentiment
+                    s_score = s.polarity
+                    s_list = sentiment_by_time.get(time_since, [])
+                    s_list.append(s_score)
+                    sentiment_by_time[time_since] = s_list
+            for time_period in sentiment_by_time:
+                json_dict = {'time_period': time_period, 
+                             'sentiment': mean(sentiment_by_time[time_period])}
+                sentiment_by_time_list.append(json_dict)
+            sentiment_by_time_list = sorted(sentiment_by_time_list, key=lambda x: x['time_period'])
+            return sentiment_by_time_list, tweet_count, scale
+    return None, None, None
 
 
 def get_time_scale(tweets, headline_text, publish_time):
@@ -139,16 +228,20 @@ def get_time_scale(tweets, headline_text, publish_time):
         publish_time(datetime) -- headline publish time 
     '''
     tweet_time = [get_tweet_time(t) for t in tweets if not is_retweet(t, headline_text)]
-    max_time = max(tweet_time)
-    min_time = min([t for t in tweet_time if t >= publish_time])
-    hour = 3600
-    diff_hours = (max_time - min_time) / hour
-    if diff_hours > 24 * 6:
-        return 'days', hour * 24
-    elif diff_hours > 4:
-        return 'hours', hour
+    tweet_time = filter(lambda t: t >= publish_time, tweet_time)
+    if tweet_time:
+        max_time = max(tweet_time)
+        min_time = min(tweet_time)
+        hour = 3600
+        diff_hours = (max_time - min_time) / hour
+        if diff_hours > 24 * 6:
+            return 'days', hour * 24
+        elif diff_hours > 4:
+            return 'hours', hour
+        else:
+            return 'minutes', hour / 60
     else:
-        return 'minutes', hour / 60
+        return None, None
 
 
 def read_db_tweets(news_id, sarg):
