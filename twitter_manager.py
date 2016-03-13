@@ -3,7 +3,6 @@ from dateutil.parser import parse
 from tweepy import OAuthHandler, API, TweepError
 import cnfg
 from pymongo import MongoClient
-import sys
 from textblob import TextBlob as tb
 from numpy import mean
 from time import mktime
@@ -11,7 +10,6 @@ from math import floor
 from bson.objectid import ObjectId
 from dateutil.parser import parse
 import headline_manager
-import pymongo
 
 
 client = MongoClient()
@@ -36,7 +34,7 @@ class Tweet:
 
     def _is_valid(self, headline_obj):
         '''
-        Check if tweet text is exact match with headline text or was tweeted prior to headline
+        Not valid if tweet text is exact match with headline text or was tweeted prior to headline
         '''
 
         if self.time_since < 0:
@@ -70,6 +68,11 @@ class Graph:
         self.points = self._make_points()
         self.tweet_count = len(self.tweets)
 
+        self._sort()
+
+    def _sort(self):
+        self.tweets.sort(key=lambda tweet: tweet.time_since)
+
     def _make_points(self):
         points = dict()
         for tweet in self.tweets:
@@ -100,6 +103,10 @@ class Graph:
             return 'hours', hour
         else:
             return 'minutes', hour / 60
+
+    def __str__(self):
+        return '\n'.join([' '.join(map(str, [t.time_since, t.scaled_time, t.text])) for t in self.tweets])
+
 
 
 
@@ -175,73 +182,6 @@ def query(sarg, headline_id, max_tweets=2000, tweets_per_qry=100, max_id=-1L, si
             break 
 
 
-def get_sentiment_over_time(news_id, sarg):
-
-
-
-    '''
-    Get saved tweets corresponding to headline and score them on sentiment
-
-    Args:
-        news_id(str) -- db id of news article
-        sarg(str) -- tweeter search arguments
-    '''
-    sentiment_by_time_list = []
-    sentiment_by_time = {}
-    tweet_count = 0
-    tweets = read_db_tweets(news_id, sarg)
-    if len(tweets) > 0:
-        headline = db.news.find_one({u'_id': ObjectId(news_id)})
-        publish_time = headline[u'time']
-        headline_text = headline['headline']
-        scale, denominator = get_time_scale(tweets, headline_text, publish_time)
-        if scale:
-            for tweet in tweets:
-                tweet_time = get_tweet_time(tweet)
-                time_since = floor((tweet_time - publish_time) / denominator)
-                if time_since > 0 and not is_retweet(tweet, headline_text):
-                    tweet_count += 1
-                    tweet_text = tweet[u'tweet_data'][u'text']
-                    t_blob = tb(tweet_text)
-                    s = t_blob.sentiment
-                    s_score = s.polarity
-                    s_list = sentiment_by_time.get(time_since, [])
-                    s_list.append(s_score)
-                    sentiment_by_time[time_since] = s_list
-            for time_period in sentiment_by_time:
-                json_dict = {'time_period': time_period, 
-                             'sentiment': mean(sentiment_by_time[time_period])}
-                sentiment_by_time_list.append(json_dict)
-            sentiment_by_time_list = sorted(sentiment_by_time_list, key=lambda x: x['time_period'])
-            return sentiment_by_time_list, tweet_count, scale
-    return None, None, None
-
-
-def get_time_scale(tweets, headline_text, publish_time):
-    '''
-    Figure out the best scale to use for displaying the data
-
-    Args:
-        tweets(list) -- tweet objects
-        headline_text(str) -- headline text
-        publish_time(datetime) -- headline publish time 
-    '''
-    tweet_time = [get_tweet_time(t) for t in tweets if not is_retweet(t, headline_text)]
-    tweet_time = filter(lambda t: t >= publish_time, tweet_time)
-    if tweet_time:
-        max_time = max(tweet_time)
-        min_time = min(tweet_time)
-        hour = 3600
-        diff_hours = (max_time - min_time) / hour
-        if diff_hours > 24 * 6:
-            return 'days', hour * 24
-        elif diff_hours > 4:
-            return 'hours', hour
-        else:
-            return 'minutes', hour / 60
-    else:
-        return None, None
-
 
 def read_db_tweets(news_id, sarg):
     '''
@@ -255,38 +195,4 @@ def read_db_tweets(news_id, sarg):
     return [tweet for tweet in cursor]
 
 
-def get_tweet_time(tweet):
-    dt = parse(tweet[u'tweet_data'][u'created_at'])
-    return headline_manager.dt_to_epoch(dt.replace(tzinfo=None))
-
-
-def find_latest_tweet_id_before_headline(headline_id):
-    '''
-    Query db for tweets that came out after the headline
-
-    Args:
-        news_id(ObjectId) -- headline id
-
-    '''
-    headline = headline_manager.get_headline_by_id(headline_id)
-    h_time = headline['time']
-    client = MongoClient()
-    db = client.twitter_news
-    db.tweets.ensure_index([("tweet_data.created_at", pymongo.DESCENDING)])
-    cursor = db.tweets.find().sort([('tweet_data.created_at', pymongo.DESCENDING)])
-    for tweet in cursor:
-        dt = parse(tweet[u'tweet_data'][u'created_at'])
-        tweet_time = mktime(dt.timetuple())
-        if tweet_time < h_time:
-            return tweet['tweet_data'][u'id']
-
-
-def is_retweet(tweet, headline_text):
-    '''
-    Check if tweet text is exact match with headline text
-    '''
-    tweet_text = tweet[u'tweet_data'][u'text']
-    if 'http' in tweet_text:
-        tweet_text = tweet_text[:tweet_text.index('http')]
-    return tweet_text.lower().strip() == headline_text.lower().strip()
 
