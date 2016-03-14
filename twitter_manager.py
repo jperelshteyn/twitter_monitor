@@ -3,6 +3,7 @@ from dateutil.parser import parse
 from tweepy import OAuthHandler, API, TweepError
 import cnfg
 from pymongo import MongoClient
+from pymongo import DESCENDING
 from textblob import TextBlob as tb
 from numpy import mean
 from time import mktime
@@ -105,7 +106,7 @@ class Graph:
             return 'minutes', hour / 60
 
     def __str__(self):
-        return '\n'.join([' '.join(map(str, [t.time_since, t.scaled_time, t.text])) for t in self.tweets])
+        return '\n'.join([' '.join(map(unicode, [t.time_since, t.scaled_time, t.text])) for t in self.tweets])
 
 
 
@@ -121,7 +122,7 @@ def initialize_api():
     return api
 
     
-def query(sarg, headline_id, max_tweets=2000, tweets_per_qry=100, max_id=-1L, since_id=None):
+def query(sarg, headline_id, max_tweets=1000, tweets_per_qry=100, max_id=-1L, since_id=None):
     '''
     Query twitter continuously with sargs and save to database
 
@@ -181,6 +182,26 @@ def query(sarg, headline_id, max_tweets=2000, tweets_per_qry=100, max_id=-1L, si
             print("some error : " + str(e))
             break 
 
+
+def find_latest_tweet_id_before_headline(headline_id):
+    '''
+    Query db for tweets that came out after the headline
+
+    Args:
+        news_id(ObjectId) -- headline id
+
+    '''
+    headline = headline_manager.get_headline_by_id(headline_id)
+    h_time = headline['time']
+    client = MongoClient()
+    db = client.twitter_news
+    db.tweets.ensure_index([("tweet_data.created_at", DESCENDING)])
+    cursor = db.tweets.find().sort([('tweet_data.created_at', DESCENDING)])
+    for tweet in cursor:
+        dt = parse(tweet[u'tweet_data'][u'created_at'])
+        tweet_time = mktime(dt.timetuple())
+        if tweet_time < h_time:
+            return tweet['tweet_data'][u'id']
 
 
 def read_db_tweets(news_id, sarg):
